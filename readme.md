@@ -70,7 +70,7 @@ The bot requires an API token for transaction verification. To get it:
 Run the bot with:
 
 ```bash
-python bot.py
+python3 bot.py
 ```
 
 Follow the interactive prompts to configure:
