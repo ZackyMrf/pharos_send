@@ -1,0 +1,34 @@
+# Sensitive credentials - IMPORTANT: these files contain private keys and tokens
+private_key.txt
+token.txt
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# Logs and transaction records
+*.log
+tx_history.json
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-*
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+
+# Temporary files
+*.tmp
+*.bak
