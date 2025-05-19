@@ -6,35 +6,60 @@ import sys
 from datetime import datetime
 from web3 import Web3, Account
 from colorama import Fore, Style, init
+import shutil  # For terminal width detection
 
 init()
 
 def print_banner():
+    # Get terminal width
+    terminal_width = shutil.get_terminal_size().columns
+    
     banner = f"""
-{Fore.MAGENTA}╔════════════════════════════════════════════════════════════╗
-║          🚀 PHAROS NETWORK TRANSACTION BOT 🚀             ║
-║                        by Mrf                            ║
-╚════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
+{Fore.MAGENTA}{'═' * (terminal_width - 2)}
+║{' ' * (terminal_width - 4)}║
+║{Fore.YELLOW}  🚀 PHAROS NETWORK TRANSACTION BOT 🚀  {Fore.MAGENTA}{' ' * (terminal_width - 44)}║
+║{Fore.CYAN}             Version 1.0 by Mrf           {Fore.MAGENTA}{' ' * (terminal_width - 44)}║
+║{' ' * (terminal_width - 4)}║
+{'═' * (terminal_width - 2)}{Style.RESET_ALL}
 """
     print(banner)
 
 def log_info(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"{Fore.BLUE}[{timestamp}] [INFO]{Style.RESET_ALL} {message}")
+    print(f"{Fore.BLUE}[{timestamp}] [INFO]{Style.RESET_ALL} ℹ️  {message}")
 
 def log_success(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"{Fore.GREEN}[{timestamp}] [SUCCESS]{Style.RESET_ALL} {message}")
+    print(f"{Fore.GREEN}[{timestamp}] [SUCCESS]{Style.RESET_ALL} ✅ {message}")
 
 def log_error(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"{Fore.RED}[{timestamp}] [ERROR]{Style.RESET_ALL} {message}")
+    print(f"{Fore.RED}[{timestamp}] [ERROR]{Style.RESET_ALL} ❌ {message}")
 
 def log_transaction(tx_number, total_txs, tx_amount, recipient_addr, tx_hash):
     timestamp = datetime.now().strftime("%H:%M:%S")
     progress = f"[{tx_number}/{total_txs}]"
-    print(f"{Fore.YELLOW}[{timestamp}] {progress}{Style.RESET_ALL} Sent {Fore.CYAN}{tx_amount}{Style.RESET_ALL} PHRS to {Fore.MAGENTA}{recipient_addr}{Style.RESET_ALL}")
-    print(f"  TX Hash: {Fore.BLUE}{tx_hash}{Style.RESET_ALL}")
+    progress_bar = create_progress_bar(tx_number, total_txs)
+    
+    print(f"\n{Fore.YELLOW}[{timestamp}] {progress} {progress_bar}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}Amount:{Style.RESET_ALL} {tx_amount} PHRS")
+    print(f"  {Fore.CYAN}To:{Style.RESET_ALL} {Fore.MAGENTA}{recipient_addr}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}Hash:{Style.RESET_ALL} {Fore.BLUE}{tx_hash}{Style.RESET_ALL}")
+
+def create_progress_bar(current, total, bar_length=20):
+    progress = min(1.0, current / total)
+    arrow = '█' * int(round(progress * bar_length))
+    spaces = ' ' * (bar_length - len(arrow))
+    
+    # Color the progress bar based on completion percentage
+    if progress < 0.3:
+        color = Fore.RED
+    elif progress < 0.7:
+        color = Fore.YELLOW
+    else:
+        color = Fore.GREEN
+        
+    return f"{color}[{arrow}{spaces}] {int(progress * 100)}%{Style.RESET_ALL}"
 
 def check_file_exists(filename):
     if not os.path.exists(filename):
@@ -53,6 +78,26 @@ def get_current_gas_price(web3_instance):
         default_gas_price = web3_instance.to_wei(5, 'gwei')
         log_info(f"Using default gas price: 5 gwei")
         return default_gas_price
+
+def print_section_header(title):
+    terminal_width = shutil.get_terminal_size().columns
+    padding = max(0, (terminal_width - len(title) - 4) // 2)
+    print(f"\n{Fore.CYAN}{'═' * padding} {title} {'═' * padding}{Style.RESET_ALL}\n")
+
+def print_summary_box(stats, elapsed_time, final_balance):
+    terminal_width = shutil.get_terminal_size().columns
+    box_width = min(60, terminal_width - 4)
+    
+    print(f"\n{Fore.CYAN}{'═' * box_width}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Fore.YELLOW} TRANSACTION SUMMARY {' ' * (box_width - 21)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{'═' * box_width}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Style.RESET_ALL} Total transactions:     {Fore.WHITE}{stats['successful_txs'] + stats['failed_txs']}{' ' * (box_width - 29)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Style.RESET_ALL} Successful transactions: {Fore.GREEN}{stats['successful_txs']}{' ' * (box_width - 29)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Style.RESET_ALL} Failed transactions:     {Fore.RED}{stats['failed_txs']}{' ' * (box_width - 29)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Style.RESET_ALL} Total PHRS sent:         {Fore.YELLOW}{stats['total_phrs_sent']:.6f}{' ' * (box_width - 36)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Style.RESET_ALL} Time elapsed:            {elapsed_time:.2f} seconds{' ' * (box_width - 33)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}║{Style.RESET_ALL} Final balance:           {Fore.GREEN}{final_balance:.6f}{Style.RESET_ALL} PHRS{' ' * (box_width - 37)}{Fore.CYAN}║{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{'═' * box_width}{Style.RESET_ALL}")
 
 def main():
     print_banner()
@@ -125,15 +170,16 @@ def main():
     network_gas_price = get_current_gas_price(web3)
     network_gas_gwei = web3.from_wei(network_gas_price, 'gwei')
 
-    print(f"\n{Fore.CYAN}=== Transaction Configuration ==={Style.RESET_ALL}")
+    print_section_header("TRANSACTION CONFIGURATION")
     try:
-        num_transactions = int(input(f"{Fore.YELLOW}Number of transactions to send:{Style.RESET_ALL} "))
-        min_phrs_amount = float(input(f"{Fore.YELLOW}Minimum PHRS per transaction (default: 0.001):{Style.RESET_ALL} ") or "0.001")
-        max_phrs_amount = float(input(f"{Fore.YELLOW}Maximum PHRS per transaction (default: 0.002):{Style.RESET_ALL} ") or "0.002")
-        wait_time_seconds = int(input(f"{Fore.YELLOW}Seconds between transactions (default: 30):{Style.RESET_ALL} ") or "30")
-        gas_input = input(f"{Fore.YELLOW}Gas price in gwei (default: {network_gas_gwei:.2f}):{Style.RESET_ALL} ")
+        print(f"{Fore.YELLOW}Please enter transaction details:{Style.RESET_ALL}")
+        num_transactions = int(input(f"  {Fore.CYAN}Number of transactions:{Style.RESET_ALL} "))
+        min_phrs_amount = float(input(f"  {Fore.CYAN}Minimum PHRS per transaction [0.001]:{Style.RESET_ALL} ") or "0.001")
+        max_phrs_amount = float(input(f"  {Fore.CYAN}Maximum PHRS per transaction [0.002]:{Style.RESET_ALL} ") or "0.002")
+        wait_time_seconds = int(input(f"  {Fore.CYAN}Seconds between transactions [30]:{Style.RESET_ALL} ") or "30")
+        gas_input = input(f"  {Fore.CYAN}Gas price in gwei [{network_gas_gwei:.2f}]:{Style.RESET_ALL} ")
         gas_price_wei = web3.to_wei(float(gas_input) if gas_input else network_gas_gwei, 'gwei')
-        gas_limit = int(input(f"{Fore.YELLOW}Gas limit (default: 21000):{Style.RESET_ALL} ") or "21000")
+        gas_limit = int(input(f"  {Fore.CYAN}Gas limit [21000]:{Style.RESET_ALL} ") or "21000")
     except ValueError:
         log_error("Please enter valid numbers")
         sys.exit(1)
@@ -166,7 +212,7 @@ def main():
     current_nonce = web3.eth.get_transaction_count(wallet_address)
     log_info(f"Starting with nonce: {current_nonce}")
 
-    print(f"\n{Fore.CYAN}=== Starting Transactions ==={Style.RESET_ALL}")
+    print_section_header("STARTING TRANSACTIONS")
     start_time = time.time()
 
     for tx_index in range(num_transactions):
@@ -211,15 +257,10 @@ def main():
             time.sleep(wait_time_seconds)
 
     elapsed_time = time.time() - start_time
-    print(f"\n{Fore.CYAN}=== Transaction Summary ==={Style.RESET_ALL}")
-    log_info(f"Total transactions: {num_transactions}")
-    log_success(f"Successful transactions: {tx_stats['successful_txs']}")
-    log_error(f"Failed transactions: {tx_stats['failed_txs']}")
-    log_info(f"Total PHRS sent: {tx_stats['total_phrs_sent']:.6f}")
-    log_info(f"Total time elapsed: {elapsed_time:.2f} seconds")
     final_balance_wei = web3.eth.get_balance(wallet_address)
     final_balance_phrs = web3.from_wei(final_balance_wei, 'ether')
-    log_info(f"Final balance: {Fore.GREEN}{final_balance_phrs:.6f}{Style.RESET_ALL} PHRS")
+    
+    print_summary_box(tx_stats, elapsed_time, final_balance_phrs)
 
 if __name__ == "__main__":
     main()
