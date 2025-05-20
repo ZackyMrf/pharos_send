@@ -231,7 +231,17 @@ def main():
             }
             signed_transaction = web3.eth.account.sign_transaction(transaction, private_key=private_key)
             log_info("Transaction signed successfully")
-            tx_hash = web3.eth.send_raw_transaction(signed_transaction.rawTransaction)
+            
+            # Fix for different web3.py versions (handle both attribute names)
+            raw_tx = None
+            if hasattr(signed_transaction, 'rawTransaction'):
+                raw_tx = signed_transaction.rawTransaction
+            elif hasattr(signed_transaction, 'raw_transaction'):
+                raw_tx = signed_transaction.raw_transaction
+            else:
+                raise AttributeError("Could not find raw transaction data in signed transaction object")
+                
+            tx_hash = web3.eth.send_raw_transaction(raw_tx)
             tx_hash_hex = web3.to_hex(tx_hash)
             log_transaction(tx_index+1, num_transactions, tx_amount_phrs, recipient_address, tx_hash_hex)
             receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
