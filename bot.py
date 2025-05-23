@@ -48,6 +48,14 @@ class ProxyManager:
         proxy_str = self.get_current_proxy()
         if not proxy_str:
             return None
+        
+        # Handle tunneling proxy format with proxy+ prefix
+        if proxy_str.startswith("proxy+"):
+            proxy_url = proxy_str.replace("proxy+", "")
+            return {
+                'http': proxy_url,
+                'https': proxy_url  # Same URL for HTTPS tunneling
+            }
             
         # Add default protocol if missing
         if not ('://' in proxy_str):
@@ -685,63 +693,131 @@ def process_wallet(web3, private_key, valid_recipients, tx_config, wallet_index,
     gas_limit = tx_config["gas_limit"]
     task_id = tx_config["task_id"]
 
+    # Process transactions with retry mechanism
     for tx_index in range(num_transactions):
-        try:
-            recipient_address = random.choice(valid_recipients)
-            tx_amount_phrs = round(random.uniform(min_phrs_amount, max_phrs_amount), 6)
-            tx_amount_wei = web3.to_wei(tx_amount_phrs, 'ether')
-            log_info(f"Preparing transaction to {recipient_address} with {tx_amount_phrs} PHRS")
-            transaction = {
-                'to': recipient_address,
-                'value': tx_amount_wei,
-                'gas': gas_limit,
-                'gasPrice': gas_price_wei,
-                'nonce': current_nonce + tx_index,
-                'chainId': config.CHAIN_ID,
-            }
-            signed_transaction = web3.eth.account.sign_transaction(transaction, private_key=private_key)
-            log_info("Transaction signed successfully")
-            
-            # Fix for different web3.py versions (handle both attribute names)
-            raw_tx = None
-            if hasattr(signed_transaction, 'rawTransaction'):
-                raw_tx = signed_transaction.rawTransaction
-            elif hasattr(signed_transaction, 'raw_transaction'):
-                raw_tx = signed_transaction.raw_transaction
-            else:
-                raise AttributeError("Could not find raw transaction data in signed transaction object")
+        # Add retry mechanism
+        max_retries = 3  # Maximum number of retry attempts
+        retry_count = 0
+        success = False
+        
+        while not success and retry_count < max_retries:
+            try:
+                if retry_count > 0:
+                    log_info(f"Retrying transaction {tx_index+1}/{num_transactions} (Attempt {retry_count+1}/{max_retries})")
+                    # Add exponential backoff for retries
+                    backoff_time = retry_count * 5
+                    log_info(f"Waiting {backoff_time} seconds before retry...")
+                    time.sleep(backoff_time)
                 
-            tx_hash = web3.eth.send_raw_transaction(raw_tx)
-            tx_hash_hex = web3.to_hex(tx_hash)
-            log_transaction(tx_index+1, num_transactions, tx_amount_phrs, recipient_address, tx_hash_hex)
-            receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-            log_success(f"Transaction confirmed in block {receipt.blockNumber}")
-            
-            # Use proxy for verification if available
-            proxies = None
-            if proxy_manager and proxy_manager.has_proxies():
-                proxies = proxy_manager.format_for_requests()
+                recipient_address = random.choice(valid_recipients)
+                tx_amount_phrs = round(random.uniform(min_phrs_amount, max_phrs_amount), 6)
+                tx_amount_wei = web3.to_wei(tx_amount_phrs, 'ether')
+                log_info(f"Preparing transaction to {recipient_address} with {tx_amount_phrs} PHRS")
                 
-            verification_url = (
-                f"https://api.pharosnetwork.xyz/task/verify?"
-                f"address={wallet_address}&task_id={task_id}&tx_hash={tx_hash_hex}"
-            )
-            response = requests.post(verification_url, headers=api_headers, proxies=proxies, timeout=30)
-            if response.ok:
-                response_json = response.json()
-                log_success(f"Verification successful: {response_json}")
-                tx_stats["successful_txs"] += 1
-                tx_stats["total_phrs_sent"] += tx_amount_phrs
-            else:
-                log_error(f"Verification failed: {response.status_code} | {response.text}")
-                tx_stats["failed_txs"] += 1
+                # Get fresh nonce for retry attempts
+                if retry_count > 0:
+                    current_nonce = web3.eth.get_transaction_count(wallet_address)
+                    log_info(f"Updated nonce to: {current_nonce + tx_index}")
                 
-                # Rotate proxy on verification failure
+                transaction = {
+                    'to': recipient_address,
+                    'value': tx_amount_wei,
+                    'gas': gas_limit,
+                    'gasPrice': gas_price_wei,
+                    'nonce': current_nonce + tx_index,
+                    'chainId': config.CHAIN_ID,
+                }
+                signed_transaction = web3.eth.account.sign_transaction(transaction, private_key=private_key)
+                log_info("Transaction signed successfully")
+                
+                # Fix for different web3.py versions (handle both attribute names)
+                raw_tx = None
+                if hasattr(signed_transaction, 'rawTransaction'):
+                    raw_tx = signed_transaction.rawTransaction
+                elif hasattr(signed_transaction, 'raw_transaction'):
+                    raw_tx = signed_transaction.raw_transaction
+                else:
+                    raise AttributeError("Could not find raw transaction data in signed transaction object")
+                    
+                tx_hash = web3.eth.send_raw_transaction(raw_tx)
+                tx_hash_hex = web3.to_hex(tx_hash)
+                log_transaction(tx_index+1, num_transactions, tx_amount_phrs, recipient_address, tx_hash_hex)
+                
+                # Wait for transaction confirmation with timeout and retry
+                receipt = None
+                receipt_retries = 2
+                for receipt_attempt in range(receipt_retries):
+                    try:
+                        receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                        break
+                    except Exception as receipt_error:
+                        if receipt_attempt < receipt_retries - 1:
+                            log_error(f"Error waiting for receipt: {str(receipt_error)}. Retrying...")
+                            time.sleep(10)
+                        else:
+                            raise
+                
+                if receipt.status != 1:
+                    raise Exception(f"Transaction failed with status {receipt.status}")
+                    
+                log_success(f"Transaction confirmed in block {receipt.blockNumber}")
+                
+                # Use proxy for verification if available
+                proxies = None
+                if proxy_manager and proxy_manager.has_proxies():
+                    proxies = proxy_manager.format_for_requests()
+                    
+                verification_url = (
+                    f"https://api.pharosnetwork.xyz/task/verify?"
+                    f"address={wallet_address}&task_id={task_id}&tx_hash={tx_hash_hex}"
+                )
+                verify_retries = 2
+                for verify_attempt in range(verify_retries):
+                    try:
+                        response = requests.post(verification_url, headers=api_headers, proxies=proxies, timeout=30)
+                        if response.ok:
+                            response_json = response.json()
+                            log_success(f"Verification successful: {response_json}")
+                            tx_stats["successful_txs"] += 1
+                            tx_stats["total_phrs_sent"] += tx_amount_phrs
+                            success = True
+                            break
+                        else:
+                            log_error(f"Verification failed: {response.status_code} | {response.text}")
+                            if verify_attempt < verify_retries - 1:
+                                log_info(f"Retrying verification...")
+                                time.sleep(5)
+                            else:
+                                tx_stats["failed_txs"] += 1
+                                
+                        # Rotate proxy on verification failure
+                        if proxy_manager and proxy_manager.has_proxies():
+                            proxy_manager.rotate_proxy(force=True)
+                    except Exception as verify_error:
+                        log_error(f"Verification error: {str(verify_error)}")
+                        if verify_attempt < verify_retries - 1:
+                            log_info(f"Retrying verification...")
+                            time.sleep(5)
+                        else:
+                            tx_stats["failed_txs"] += 1
+                
+                # Mark as success if we got this far
+                if not success:
+                    success = True
+                    
+            except Exception as error:
+                log_error(f"Transaction error: {str(error)}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    log_error(f"Failed to complete transaction after {max_retries} attempts")
+                    tx_stats["failed_txs"] += 1
+                # Rotate proxy on error if available
                 if proxy_manager and proxy_manager.has_proxies():
                     proxy_manager.rotate_proxy(force=True)
-        except Exception as error:
-            log_error(f"Transaction error: {str(error)}")
-            tx_stats["failed_txs"] += 1
+            
+            if success:
+                break
+        
         if tx_index < num_transactions - 1:
             remaining = num_transactions - (tx_index + 1)
             log_info(f"Waiting {wait_time_seconds} seconds before next transaction. Remaining: {remaining}")
@@ -971,10 +1047,10 @@ def main():
             overall_stats["failed_txs"] += stats["failed_txs"]
             overall_stats["total_phrs_sent"] += stats["total_phrs_sent"]
         
-        # Wait between wallets
+        # Wait between wallets - FIXED: time.time(10) to time.sleep(10) 
         if idx < len(wallets_to_process) - 1:
             log_info(f"Waiting 10 seconds before processing next wallet...")
-            time.time(10)
+            time.sleep(10)  # Fixed from time.time(10)
     
     total_elapsed_time = time.time() - start_time
     
