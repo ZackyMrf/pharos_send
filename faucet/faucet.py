@@ -105,23 +105,27 @@ class ProxyManager:
         
         proxy = self.proxies[self.current_index]
         
-        # Format: username:password@ip:port
-        # Create proper proxy dict
-        if '@' in proxy:
-            # Handle proxy with auth
-            auth, ip_port = proxy.split('@')
+        # Extract hostname for logging (avoid showing credentials)
+        hostname = proxy.split('@')[-1] if '@' in proxy else proxy
+        hostname = hostname.replace("proxy+", "") if hostname.startswith("proxy+") else hostname
+        log_info(f"Using proxy: {hostname}")
+        
+        # Handle tunneling proxy format with proxy+ prefix
+        if proxy.startswith("proxy+"):
+            proxy_url = proxy.replace("proxy+", "")
             proxy_dict = {
-                "http": f"http://{proxy}",
-                "https": f"http://{proxy}"
+                "http": proxy_url,
+                "https": proxy_url  # Same URL for HTTPS tunneling
             }
         else:
-            # Handle proxy without auth
+            # Standard proxy format
+            if not ('://' in proxy):
+                proxy = f"http://{proxy}"
             proxy_dict = {
-                "http": f"http://{proxy}",
-                "https": f"http://{proxy}"
+                "http": proxy,
+                "https": proxy
             }
         
-        log_info(f"Using proxy: {proxy.split('@')[-1]}")
         self.current_index = (self.current_index + 1) % len(self.proxies)
         return proxy_dict
 
