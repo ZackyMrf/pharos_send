@@ -1,29 +1,36 @@
 # Pharos Network Bot
 
-A Python toolset to automate interactions with the Pharos Network testnet. This repository contains two main bots:
+A comprehensive Python toolset to automate interactions with the Pharos Network testnet, supporting both transaction batching and faucet automation.
 
-- **Transaction Bot**: Sends multiple transactions with randomized amounts.
-- **Faucet Bot**: Claims testnet tokens automatically and forwards them to a central wallet.
+## Overview
+
+This repository contains two main bots:
+
+- **Transaction Bot:** Automates sending transactions, DeFi operations, and daily point check-ins.
+- **Faucet Bot:** Automates claiming and forwarding testnet tokens using newly generated wallets.
 
 ---
 
 ## Features
 
 ### Transaction Bot
+- Multi-wallet support (load wallets from file)
 - Connects to multiple Pharos testnet RPC endpoints
-- Sends transactions with randomized amounts
-- Automatic transaction verification via API
-- Detailed logging with colored output
+- Randomizes transaction amounts and parameters
+- Verifies transactions via API
+- Supports DeFi operations: token swaps & liquidity provision
+- Daily check-in for points
+- Detailed colored logging and statistical batch reports
 - Monitors transaction confirmations
-- Generates statistical reports for transaction batches
+- Proxy support (including advanced tunneling with `proxy+` prefix)
 
 ### Faucet Bot
-- Creates multiple wallets automatically
-- Claims testnet tokens from the faucet
-- Forwards claimed tokens to a central wallet
-- Proxy support for improved success rates
-- Detailed logging and progress tracking
-- Saves wallet information for future use
+- Auto-generates wallets and manages them
+- Claims testnet tokens from the Pharos faucet
+- Automatically forwards claimed tokens to a central wallet
+- Proxy support for improved claim success
+- Progress tracking and logging
+- Wallets saved for reuse
 
 ---
 
@@ -58,38 +65,34 @@ A Python toolset to automate interactions with the Pharos Network testnet. This 
 
 ### Transaction Bot
 
-Before running the transaction bot, create the following files in the project directory:
+Create these files in the project directory:
 
-- **private_key.txt**: Your Ethereum private key (without the '0x' prefix)
-- **token.txt**: Your Pharos Network API bearer token
-- **recipients.txt**: List of Ethereum addresses to receive transactions (one per line)
+- `private_key.txt`: Ethereum private keys (one per line, without the '0x' prefix)
+- `recipients.txt`: Ethereum addresses to receive transactions (one per line)
+- `proxy.txt`: (Optional) HTTP proxies for API/web3 connections
 
 ### Faucet Bot
 
-To use the faucet bot:
-
-1. Navigate to the faucet directory:  
-   `cd faucet`
-2. Create a `.env` file (you can copy from `.env.example`)
-3. (Optional) Configure proxies in `proxy.txt` for better success rates
-4. The bot will save generated wallets to `wallets.txt`
+1. Enter the faucet directory:
+   ```bash
+   cd faucet
+   ```
+2. Copy and configure your `.env` file:
+   ```bash
+   cp .env.example .env
+   ```
+3. (Optional) Add proxies to `proxy.txt` for higher claim rates.
+4. Generated wallets will be saved to `wallets.txt`.
 
 ---
 
-## How to Obtain a Pharos Network API Token
+## Authentication
 
-The API token is required for transaction verification:
+Signature-based authentication is used—no separate token file is required.
 
-1. Visit [Pharos Network Testnet](https://testnet.pharosnetwork.xyz/)
-2. Click "Connect Wallet" (top-right corner)
-3. Connect with your Ethereum wallet (MetaMask recommended)
-4. Press `F12` to open browser developer tools
-5. Go to the "Application" tab
-6. In the left sidebar, expand "Local Storage"
-7. Click the website domain (`pharosnetwork.xyz`)
-8. Find an entry with "PHAROS_AUTHORIZATION_TOKEN" in the key
-9. Copy the value (starts with `eyJ...`)
-10. Paste it into `token.txt`
+- Private key signs a message to obtain a JWT token
+- JWT token is used for all API calls
+- Daily check-ins handled automatically
 
 ---
 
@@ -97,48 +100,44 @@ The API token is required for transaction verification:
 
 ### Transaction Bot
 
-Run the transaction bot:
-
+Run with:
 ```bash
 python3 bot.py
 ```
+You'll be prompted to:
+- Choose a wallet (or use all)
+- Configure transaction count, amounts, delays, gas settings, DeFi options, etc.
 
-Follow the interactive prompts to configure:
-
-- Number of cycles (transactions) to send
-- Minimum and maximum transaction amounts
-- Delay between transactions (seconds)
-- Gas price (gwei) and gas limit
-
-**Example configuration:**
+**Example:**
 ```
 === Transaction Configuration ===
-Number of cycles to run: 5
-Minimum amount to send (default: 0.001): 0.0001
-Maximum amount to send (default: 0.002): 0.0002
-Delay between transactions in seconds (default: 30): 20
-Gas price in gwei (default: 5.00): 5
-Gas limit (default: 21000): 21000
+Number of transactions: 5
+Minimum PHRS per transaction [0.001]: 0.0001
+Maximum PHRS per transaction [0.002]: 0.0002
+Seconds between transactions [30]: 20
+Gas price in gwei [1.00]: 1
+Gas limit [21000]: 21000
+Perform token swaps (y/n) [n]: y
+Number of swaps [1]: 2
+Add liquidity to pools (y/n) [n]: y
+Number of LP additions [1]: 1
 ```
 
 ### Faucet Bot
 
-Run the faucet bot:
-
+Run with:
 ```bash
 cd faucet
 python3 faucet.py
 ```
+You'll be prompted for:
+- Recipient address (where claimed tokens are sent)
+- Number of claims to perform
 
-You'll be prompted to:
-- Enter the recipient address (where all claimed tokens will be sent)
-- Enter the number of faucet claims to perform
-
-The bot will:
-1. Create new wallets
-2. Register them with the Pharos Network
-3. Claim tokens from the faucet
-4. Forward the tokens to your specified address
+Process:
+1. Wallets are generated and registered
+2. Claims are made from the faucet
+3. Tokens are forwarded to your specified address
 
 ---
 
@@ -147,9 +146,8 @@ The bot will:
 ⚠️ **IMPORTANT** ⚠️
 
 - **Never share your `private_key.txt` or commit it to a public repository**
-- **Keep your `token.txt` confidential**
-- Both files are included in `.gitignore` to prevent accidental exposure
-- The faucet bot generates new wallets and saves them to `wallets.txt` – keep this file secure
+- Sensitive files are included in `.gitignore` by default
+- Faucet-generated wallets are stored in `wallets.txt`—keep it secure
 
 ---
 
@@ -158,46 +156,61 @@ The bot will:
 ```
 .
 ├── bot.py                  # Main transaction bot script
+├── config.py               # Contracts and ABIs config
 ├── requirements.txt        # Python dependencies
-├── private_key.txt         # Your private key (keep secure)
-├── token.txt               # API bearer token (keep secure)
-├── recipients.txt          # List of recipient addresses
-├── .gitignore              # Prevents sensitive files from being committed
+├── private_key.txt         # Your private keys (keep secure)
+├── proxy.txt               # List of proxies (optional)
+├── recipients.txt          # Recipient addresses
+├── .gitignore              # Ignores sensitive files
 ├── readme.md               # Documentation
-└── faucet/                 # Faucet bot directory
+└── faucet/                 # Faucet bot
     ├── faucet.py           # Faucet bot script
-    ├── .env                # Environment configuration (keep secure)
-    ├── .env.example        # Example configuration template
-    ├── proxy.txt           # List of proxies for faucet claims (optional)
+    ├── .env                # Env config (keep secure)
+    ├── .env.example        # Example env config
+    ├── proxy.txt           # Faucet proxies (optional)
     └── wallets.txt         # Generated wallets (keep secure)
 ```
+
+---
+
+## Proxy Setup
+
+Use HTTP proxies in this format:
+
+```
+http://username:password@ip:port
+proxy+http://username:password@ip:port  # For tunneling proxies
+```
+The `proxy+` prefix enables HTTPS tunneling for advanced proxy use.
 
 ---
 
 ## Troubleshooting
 
 ### Connection Issues
-- Check your internet connection
-- Try running the bot at a different time (servers may be busy)
-- Ensure you're not behind a restrictive firewall
+- Check your internet and proxies
+- Try at different times (servers may be busy)
+- Avoid restrictive firewalls
 
 ### Transaction Errors
-- Make sure your account holds sufficient PHRS tokens
-- Confirm the gas price is adequate
-- Verify your private key is correct
+- Ensure sufficient PHRS balance
+- Check gas price and private key validity
+- Verify contract addresses in `config.py`
 
-### API Verification Failures
-- Your token may have expired (tokens usually last 30 days)
-- Obtain a new token (see instructions above)
-- Check that the `task_id` in the code is correct
+### API Authentication Failures
+- Check your private key
+- The bot auto-refreshes JWT tokens as needed
+
+### DeFi Operation Failures
+- Ensure enough tokens/approvals for swaps/liquidity
+- Confirm contract addresses in `config.py`
 
 ### Faucet Claim Failures
-- Add more proxies to improve success rate
-- Some IP addresses may be rate-limited
-- Try smaller batch sizes by editing the `.env` file
+- Use more proxies to avoid rate limits
+- Try smaller batch sizes in `.env`
+- Some IPs may be blocked or throttled
 
 ---
-
 
 ## License
 
