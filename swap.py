@@ -64,6 +64,24 @@ class ProxyManager:
             'http': proxy_str,
             'https': proxy_str
         }
+    def test_proxy(self, test_url="https://api.pharosnetwork.xyz/health"):
+        """Test if a proxy is working properly"""
+        proxy_url = self.get_current_proxy()
+        if not proxy_url:
+            return False
+        
+        try:
+            log_info(f"Testing proxy connection: {proxy_url}")
+            response = requests.get(test_url, proxies=self.format_for_requests(), timeout=10)
+            if response.status_code < 400:
+                log_success(f"Proxy test successful: {proxy_url}")
+                return True
+            else:
+                log_error(f"Proxy test failed with status {response.status_code}")
+                return False
+        except Exception as e:
+            log_error(f"Proxy test error: {str(e)}")
+            return False
         
     def format_for_web3(self):
         """Format current proxy string for Web3 connection"""
@@ -201,45 +219,59 @@ def sign_message(web3, private_key, message="pharos"):
     return signed_message.signature.hex(), address
 
 def login_with_signature(web3, private_key, proxy_manager=None):
-    """Get JWT token from API using signature"""
+    """Get JWT token from API using signature with fallback to direct connection"""
     signature, address = sign_message(web3, private_key)
     log_info(f"Generated signature for {address}")
     
     url = f"https://api.pharosnetwork.xyz/user/login?address={address}&signature={signature}"
     headers = {
         "Origin": "https://testnet.pharosnetwork.xyz", 
-        "Referer": "https://testnet.pharosnetwork.xyz/"
+        "Referer": "https://testnet.pharosnetwork.xyz/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36"
     }
     
-    # Prepare proxy if available
-    proxies = None
+    # First try with proxy if available
     if proxy_manager and proxy_manager.has_proxies():
-        proxies = proxy_manager.format_for_requests()
-        log_info(f"Using proxy for API login: {proxy_manager.get_current_proxy()}")
+        for attempt in range(3):  # Try up to 3 different proxies
+            proxies = proxy_manager.format_for_requests()
+            current_proxy = proxy_manager.get_current_proxy()
+            
+            # Skip testing if proxy is clearly invalid
+            if current_proxy is None or current_proxy.strip() == "":
+                proxy_manager.rotate_proxy(force=True)
+                continue
+                
+            log_info(f"Attempt {attempt+1}/3: Using proxy for API login: {current_proxy}")
+            
+            try:
+                response = requests.post(url, headers=headers, proxies=proxies, timeout=45)
+                if response.ok:
+                    data = response.json()
+                    if data.get("code") == 0:
+                        jwt_token = data.get("data", {}).get("jwt")
+                        log_success(f"Login successful via proxy, received JWT token")
+                        return jwt_token
+                log_error(f"Login failed via proxy: {response.status_code}")
+                proxy_manager.rotate_proxy(force=True)
+            except Exception as e:
+                log_error(f"Login error via proxy: {str(e)}")
+                proxy_manager.rotate_proxy(force=True)
     
+    # Fall back to direct connection if all proxies failed
+    log_info("Trying direct connection without proxy...")
     try:
-        response = requests.post(url, headers=headers, proxies=proxies, timeout=45)
+        response = requests.post(url, headers=headers, timeout=45)
         if response.ok:
             data = response.json()
             if data.get("code") == 0:
                 jwt_token = data.get("data", {}).get("jwt")
-                log_success(f"Login successful, received JWT token")
+                log_success(f"Login successful via direct connection, received JWT token")
                 return jwt_token
-        log_error(f"Login failed: {response.status_code} | {response.text}")
-        
-        # Rotate proxy on failure if we're using proxies
-        if proxy_manager and proxy_manager.has_proxies():
-            proxy_manager.rotate_proxy(force=True)
-            
-        return None
+        log_error(f"Login failed via direct connection: {response.status_code} | {response.text}")
     except Exception as e:
-        log_error(f"Login error: {str(e)}")
+        log_error(f"Login error via direct connection: {str(e)}")
         
-        # Rotate proxy on failure if we're using proxies
-        if proxy_manager and proxy_manager.has_proxies():
-            proxy_manager.rotate_proxy(force=True)
-            
-        return None
+    return None
 
 def get_token_balance(web3, token_address, wallet_address):
     """Get balance of a specific token for a wallet"""
