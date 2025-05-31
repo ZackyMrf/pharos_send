@@ -1,2 +1,1 @@
-username1:password1@ip1:port1
-username2:password2@ip2:port2
+proxy+http://7000c7e6f6a43411f89a:ae3c7d26f02f8d75@177.54.154.87:823
