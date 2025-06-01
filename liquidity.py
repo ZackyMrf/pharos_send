@@ -492,9 +492,9 @@ def main():
     
     # Show command menu
     print("\nLiquidity Management Options:")
-    print("1. View Liquidity Positions")
+    print("1. View Liquidity Positions (under development)")
     print("2. Add Liquidity")
-    print("3. Remove Liquidity")
+    print("3. Remove Liquidity(under development)")
     print("4. Exit")
     
     choice = input("\nEnter your choice (1-4): ")
