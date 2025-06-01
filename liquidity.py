@@ -31,7 +31,7 @@ def add_liquidity(web3, private_key, amount_usdc, tick_range_type="full", amount
     Returns:
     - Transaction hash if successful, None otherwise
     """
-    log_info(f"Preparing to add liquidity with {amount_usdc} USDC using {tick_range_type} range...")
+    log_info(f"Preparing to add liquidity with {amount_usdc} PHRS using {tick_range_type} range...")
     
     try:
         account = web3.eth.account.from_key(private_key)
@@ -257,3 +257,274 @@ def add_liquidity(web3, private_key, amount_usdc, tick_range_type="full", amount
         elif "gas required exceeds" in str(e):
             log_error("Transaction requires more gas. Try increasing the gas limit.")
         return None
+
+def remove_liquidity(web3, private_key, token_id, liquidity_percentage=100):
+    """
+    Remove liquidity from a position
+    
+    Parameters:
+    - web3: Web3 instance
+    - private_key: Wallet private key
+    - token_id: NFT token ID representing the position
+    - liquidity_percentage: Percentage of liquidity to remove (1-100)
+    
+    Returns:
+    - Transaction hash if successful, None otherwise
+    """
+    log_info(f"Preparing to remove {liquidity_percentage}% liquidity from position #{token_id}...")
+    
+    try:
+        account = web3.eth.account.from_key(private_key)
+        address = account.address
+        
+        # Get position manager contract
+        position_manager = web3.eth.contract(
+            address=web3.to_checksum_address(config.POSITION_MANAGER_ADDRESS), 
+            abi=config.POSITION_MANAGER_ABI
+        )
+        
+        # Get current nonce
+        nonce = web3.eth.get_transaction_count(address)
+        
+        # First get position information
+        try:
+            position = position_manager.functions.positions(token_id).call()
+            liquidity = position[7]  # Liquidity is at index 7
+            
+            # Calculate liquidity to remove based on percentage
+            liquidity_to_remove = int(liquidity * liquidity_percentage / 100)
+            
+            if liquidity_to_remove <= 0:
+                log_error(f"No liquidity to remove from position #{token_id}")
+                return None
+                
+            log_info(f"Position has {liquidity} liquidity, removing {liquidity_to_remove}")
+        except Exception as e:
+            log_error(f"Failed to get position info: {str(e)}")
+            return None
+        
+        # Prepare decrease liquidity parameters
+        current_timestamp = int(time.time())
+        deadline = current_timestamp + 600  # 10 minutes from now
+        
+        decrease_params = {
+            "tokenId": token_id,
+            "liquidity": liquidity_to_remove,
+            "amount0Min": 0,
+            "amount1Min": 0,
+            "deadline": deadline
+        }
+        
+        # Build and sign decreaseLiquidity transaction
+        decrease_tx = position_manager.functions.decreaseLiquidity(
+            decrease_params
+        ).build_transaction({
+            'from': address,
+            'nonce': nonce,
+            'gas': 500000,
+            'gasPrice': web3.eth.gas_price + random.randint(100000, 2000000),
+            'chainId': config.CHAIN_ID
+        })
+        
+        signed_decrease = web3.eth.account.sign_transaction(decrease_tx, private_key=private_key)
+        
+        # Handle different web3.py versions
+        if hasattr(signed_decrease, 'rawTransaction'):
+            raw_tx = signed_decrease.rawTransaction
+        elif hasattr(signed_decrease, 'raw_transaction'):
+            raw_tx = signed_decrease.raw_transaction
+        else:
+            raise AttributeError("Could not find raw transaction data in signed transaction")
+            
+        tx_hash = web3.eth.send_raw_transaction(raw_tx)
+        log_info(f"Decrease liquidity transaction sent: {web3.to_hex(tx_hash)}")
+        
+        # Wait for transaction to be mined
+        receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+        if receipt.status != 1:
+            log_error("Decrease liquidity transaction failed")
+            return None
+            
+        log_success(f"Successfully decreased liquidity for position #{token_id}")
+        
+        # If we're removing 100% liquidity, collect all fees and tokens
+        if liquidity_percentage == 100:
+            nonce += 1
+            
+            # Collect all tokens
+            collect_params = {
+                "tokenId": token_id,
+                "recipient": address,
+                "amount0Max": 2**128 - 1,  # Max uint128
+                "amount1Max": 2**128 - 1   # Max uint128
+            }
+            
+            collect_tx = position_manager.functions.collect(
+                collect_params
+            ).build_transaction({
+                'from': address,
+                'nonce': nonce,
+                'gas': 300000,
+                'gasPrice': web3.eth.gas_price + random.randint(100000, 2000000),
+                'chainId': config.CHAIN_ID
+            })
+            
+            signed_collect = web3.eth.account.sign_transaction(collect_tx, private_key=private_key)
+            
+            # Handle different web3.py versions
+            if hasattr(signed_collect, 'rawTransaction'):
+                raw_collect_tx = signed_collect.rawTransaction
+            elif hasattr(signed_collect, 'raw_transaction'):
+                raw_collect_tx = signed_collect.raw_transaction
+            else:
+                raise AttributeError("Could not find raw transaction data in signed transaction")
+                
+            collect_tx_hash = web3.eth.send_raw_transaction(raw_collect_tx)
+            log_info(f"Collect tokens transaction sent: {web3.to_hex(collect_tx_hash)}")
+            
+            # Wait for transaction to be mined
+            collect_receipt = web3.eth.wait_for_transaction_receipt(collect_tx_hash, timeout=180)
+            if collect_receipt.status != 1:
+                log_error("Collect tokens transaction failed")
+            else:
+                log_success(f"Successfully collected tokens from position #{token_id}")
+        
+        return web3.to_hex(tx_hash)
+        
+    except Exception as e:
+        log_error(f"Error during liquidity removal: {str(e)}")
+        return None
+
+def get_liquidity_positions(web3, address):
+    """
+    Get all liquidity positions for a wallet
+    
+    Parameters:
+    - web3: Web3 instance
+    - address: Wallet address
+    
+    Returns:
+    - List of position details
+    """
+    log_info(f"Fetching liquidity positions for {address}...")
+    
+    try:
+        # Get position manager contract
+        position_manager = web3.eth.contract(
+            address=web3.to_checksum_address(config.POSITION_MANAGER_ADDRESS), 
+            abi=config.POSITION_MANAGER_ABI
+        )
+        
+        # Get balance of position NFTs
+        balance = position_manager.functions.balanceOf(address).call()
+        log_info(f"Found {balance} liquidity positions")
+        
+        positions = []
+        
+        # Iterate through each position
+        for i in range(balance):
+            try:
+                token_id = position_manager.functions.tokenOfOwnerByIndex(address, i).call()
+                position_data = position_manager.functions.positions(token_id).call()
+                
+                # Format position data
+                position = {
+                    'token_id': token_id,
+                    'token0': position_data[2],
+                    'token1': position_data[3],
+                    'fee': position_data[4],
+                    'tick_lower': position_data[5],
+                    'tick_upper': position_data[6],
+                    'liquidity': position_data[7],
+                    'fee_growth_inside0_last_X128': position_data[8],
+                    'fee_growth_inside1_last_X128': position_data[9],
+                    'tokens_owed0': position_data[10],
+                    'tokens_owed1': position_data[11]
+                }
+                
+                positions.append(position)
+                log_info(f"Position #{token_id}: Liquidity={position['liquidity']}")
+            except Exception as e:
+                log_error(f"Error fetching position {i}: {str(e)}")
+        
+        return positions
+        
+    except Exception as e:
+        log_error(f"Error getting liquidity positions: {str(e)}")
+        return []
+
+def main():
+    """
+    Main function to demonstrate usage
+    """
+    import sys
+    import os
+    from web3 import Web3
+    
+    # Connect to network
+    rpc_endpoint = "https://testnet.dplabs-internal.com"
+    web3 = Web3(Web3.HTTPProvider(rpc_endpoint))
+    
+    # Check connection
+    if not web3.is_connected():
+        log_error("Failed to connect to RPC endpoint")
+        sys.exit(1)
+    
+    log_success("Connected to Pharos Network")
+    
+    # Load private key
+    if not os.path.exists("private_key.txt"):
+        log_error("private_key.txt file not found")
+        sys.exit(1)
+        
+    with open("private_key.txt", "r") as f:
+        private_keys = [line.strip() for line in f if line.strip()]
+        
+    if not private_keys:
+        log_error("No private keys found in private_key.txt")
+        sys.exit(1)
+        
+    private_key = private_keys[0]
+    account = web3.eth.account.from_key(private_key)
+    address = account.address
+    
+    log_info(f"Using wallet: {address}")
+    
+    # Show command menu
+    print("\nLiquidity Management Options:")
+    print("1. View Liquidity Positions")
+    print("2. Add Liquidity")
+    print("3. Remove Liquidity")
+    print("4. Exit")
+    
+    choice = input("\nEnter your choice (1-4): ")
+    
+    if choice == "1":
+        positions = get_liquidity_positions(web3, address)
+        if positions:
+            print("\nLiquidity Positions:")
+            for pos in positions:
+                print(f"Position #{pos['token_id']}: {pos['liquidity']} liquidity units")
+    
+    elif choice == "2":
+        amount = float(input("Enter USDC amount to add: "))
+        range_type = input("Select range type (full/narrow/custom) [full]: ") or "full"
+        result = add_liquidity(web3, private_key, amount, range_type)
+        if result:
+            log_success(f"Liquidity added successfully: {result}")
+    
+    elif choice == "3":
+        token_id = int(input("Enter position token ID to remove: "))
+        percentage = int(input("Enter percentage to remove (1-100) [100]: ") or "100")
+        result = remove_liquidity(web3, private_key, token_id, percentage)
+        if result:
+            log_success(f"Liquidity removed successfully: {result}")
+    
+    elif choice == "4":
+        sys.exit(0)
+    
+    else:
+        log_error("Invalid choice")
+
+if __name__ == "__main__":
+    main()
